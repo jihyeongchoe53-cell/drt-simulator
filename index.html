@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>심야 DRT 시뮬레이터</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5f6fa;--surface:#fff;--border:#e2e5ed;
+  --text:#1a1d27;--muted:#8b909e;--sub:#c2c6d0;
+  --k1:#ef4444;--k2:#3b82f6;--k3:#16a34a;--k4:#7c3aed;
+  --accent:#f59e0b;
+  --taxi:#64748b;
+  --drt-bar:#16a34a;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans KR',sans-serif;height:100svh;display:flex;flex-direction:column;overflow:hidden}
+
+.header{padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.header-title{font-family:'Space Mono',monospace;font-size:12px;color:var(--accent);font-weight:700}
+.header-sub{font-size:10px;color:var(--muted);margin-top:1px}
+
+.cluster-tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+.cluster-tab{flex:1;padding:8px 2px;text-align:center;font-size:11px;font-family:'Space Mono',monospace;font-weight:700;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;transition:all .2s;line-height:1.5}
+.cluster-tab[data-cluster="K-1"].active{border-bottom-color:var(--k1);color:var(--k1);background:rgba(239,68,68,.06)}
+.cluster-tab[data-cluster="K-2"].active{border-bottom-color:var(--k2);color:var(--k2);background:rgba(59,130,246,.06)}
+.cluster-tab[data-cluster="K-3"].active{border-bottom-color:var(--k3);color:var(--k3);background:rgba(22,163,74,.06)}
+.cluster-tab[data-cluster="K-4"].active{border-bottom-color:var(--k4);color:var(--k4);background:rgba(124,58,237,.06)}
+
+.map-wrap{flex:1;position:relative;overflow:hidden}
+#map{width:100%;height:100%}
+
+/* ── 지도 배경 토글: 일반 / 위성 ── */
+.maptype-toggle{
+  position:absolute;top:8px;right:8px;left:auto;z-index:505;
+  display:flex;align-items:center;gap:2px;
+  background:rgba(255,255,255,.96);border:1px solid rgba(100,116,139,.18);
+  border-radius:999px;padding:5px;box-shadow:0 3px 12px rgba(15,23,42,.10);
+}
+.maptype-btn{
+  border:none;background:transparent;color:#64748b;cursor:pointer;
+  border-radius:999px;padding:8px 12px;font-family:'Noto Sans KR',sans-serif;
+  font-size:12.5px;font-weight:900;line-height:1;white-space:nowrap;
+}
+.maptype-btn.active{background:#1a1d27;color:#fff}
+@media (max-width:380px){
+  .maptype-toggle{top:6px;right:6px;left:auto;padding:4px}
+  .maptype-btn{font-size:12px;padding:7.5px 11px}
+}
+
+
+/* ── 모드 토글 ── */
+.mode-toggle{
+  position:absolute;top:10px;left:calc(50% - 10px);transform:translateX(-50%);
+  display:flex;background:rgba(255,255,255,.95);border:1px solid var(--border);
+  border-radius:24px;padding:3px;z-index:500;
+  box-shadow:0 2px 12px rgba(0,0,0,.1);
+}
+.mode-btn{padding:6px 10px;font-size:11px;font-weight:700;border:none;background:transparent;border-radius:20px;cursor:pointer;color:var(--muted);font-family:'Noto Sans KR',sans-serif;transition:all .2s;white-space:nowrap;word-break:keep-all;display:flex;align-items:center;justify-content:center;gap:3px;min-width:52px;}
+.mode-btn.active{background:var(--text);color:#fff}
+.vehicle-icon{display:inline-block;transform:scaleX(-1);transform-origin:center center;}
+.bar-icon .vehicle-icon{display:inline-block;}
+
+/* ── 요금 범례: 모바일 우선 ultra compact ── */
+.fare-legend{
+  position:absolute;top:52px;left:50%;transform:translateX(-50%);
+  z-index:500;background:rgba(255,255,255,.96);
+  border:1px solid rgba(100,116,139,.16);border-radius:14px;
+  box-shadow:0 3px 12px rgba(15,23,42,.10);
+  width:max-content;max-width:calc(100% - 18px);
+  padding:6px 32px 6px 8px;
+  color:var(--muted);font-weight:800;
+  min-height:36px;
+}
+.fare-legend-content{display:flex;flex-direction:column;gap:4px;width:max-content;max-width:100%}
+.fare-card-row{display:grid;grid-template-columns:18px minmax(0,1fr);column-gap:5px;align-items:start;width:max-content;max-width:100%}
+.fare-card-icon{font-size:13px;line-height:1.05;text-align:center;padding-top:1px}
+.fare-card-main{min-width:0;display:flex;flex-direction:column;gap:1px;line-height:1.12}
+.fare-card-top{display:flex;align-items:center;gap:4px;min-width:0;white-space:nowrap}
+.fare-title{font-size:10px;color:var(--text);font-weight:900;white-space:nowrap;letter-spacing:-.35px}
+.fare-chip{font-size:9.7px;color:var(--text);font-weight:900;white-space:nowrap;background:#f1f5f9;border-radius:999px;padding:1px 5px;line-height:1.2;letter-spacing:-.25px}
+.fare-chip.green{color:var(--drt-bar);background:rgba(22,163,74,.10)}
+.fare-note{font-size:9.3px;color:var(--muted);font-weight:800;white-space:nowrap;letter-spacing:-.35px}
+.fare-note .green{color:var(--drt-bar);font-weight:900}
+.fare-legend-toggle{
+  position:absolute;right:7px;top:7px;width:22px;height:22px;
+  border:1px solid rgba(100,116,139,.24);border-radius:50%;
+  background:#eef1f5;color:#64748b;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:900;line-height:1;font-family:'Noto Sans KR',sans-serif;
+  box-shadow:none;
+}
+.fare-legend-toggle:active{transform:scale(.94);background:#e2e8f0}
+.fare-legend.collapsed{
+  width:auto;height:34px;padding:0 8px;display:flex;align-items:center;justify-content:center;
+}
+.fare-legend.collapsed .fare-legend-content{display:none}
+.fare-legend.collapsed .fare-legend-toggle{position:static;width:auto;height:24px;border-radius:8px;font-size:11px;padding:0 8px;white-space:nowrap;gap:2px}
+@media (max-width:380px){
+  .mode-toggle{top:8px;left:calc(50% - 10px);transform:translateX(-50%)}
+  .mode-btn{font-size:10.5px;padding:6px 8px;min-width:48px}
+  .fare-legend{top:52px;max-width:calc(100% - 14px);padding:5px 30px 5px 7px;border-radius:13px}
+  .fare-card-row{grid-template-columns:17px minmax(0,1fr);column-gap:4px}
+  .fare-card-icon{font-size:12.5px}
+  .fare-title{font-size:9.4px}
+  .fare-chip{font-size:9.1px;padding:1px 4px}
+  .fare-note{font-size:8.8px}
+}
+@media (max-width:330px){
+  .fare-legend{left:8px;right:auto;transform:none;max-width:calc(100% - 16px);}
+  .fare-title{font-size:8.9px}
+  .fare-chip{font-size:8.6px;padding:1px 3px}
+  .fare-note{font-size:8.4px}
+}
+
+/* ── 비교 카드 (드래그 가능) ── */
+.compare-card{
+  position:absolute;
+  background:rgba(255,255,255,.97);border-radius:14px;
+  z-index:500;display:none;
+  width:calc(100% - 20px);max-width:300px;
+  box-shadow:0 4px 20px rgba(0,0,0,.13);
+  border:1px solid var(--border);
+  user-select:none;touch-action:none;
+}
+.card-handle{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:6px 10px 5px;cursor:grab;
+  border-bottom:1px solid var(--border);border-radius:14px 14px 0 0;
+}
+.card-handle:active{cursor:grabbing}
+.card-drag-hint{width:28px;height:24px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#8b909e;font-family:'Space Mono',monospace;letter-spacing:0;cursor:grab;line-height:1;border-radius:8px;background:#f5f6fa}
+.card-minimize{width:24px;height:24px;border:none;background:#ef4444;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:0;color:transparent;line-height:0;flex-shrink:0;box-shadow:0 2px 8px rgba(239,68,68,.35);position:relative;}
+.card-minimize::before{content:"";position:absolute;left:50%;top:50%;width:12px;height:3px;background:#fff;border-radius:999px;transform:translate(-50%,-50%);}
+.card-minimize:active{background:#dc2626;transform:scale(.92)}
+.card-body{padding:9px 12px 10px}
+
+.headline{text-align:center;font-family:'Noto Sans KR',sans-serif;font-size:18px;font-weight:900;background:linear-gradient(135deg,#16a34a 0%,#22c55e 100%);-webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:-0.5px;line-height:1.1;}
+.headline-sub{text-align:center;font-size:9.5px;color:var(--muted);margin-top:1px;margin-bottom:6px;}
+.cost-summary{background:rgba(22,163,74,.07);border:1px solid rgba(22,163,74,.16);border-radius:10px;padding:6px 8px;margin:0 0 8px;text-align:center;line-height:1.35;}
+.cost-main{font-size:10.5px;font-weight:800;color:var(--text);}
+.cost-main .save{color:var(--drt-bar);font-family:'Space Mono',monospace;font-weight:900;}
+.cost-sub{font-size:9.5px;color:var(--muted);margin-top:2px;}
+.cost-sub strong{color:var(--text);font-family:'Space Mono',monospace;}
+
+.metric-row{margin-bottom:7px}
+.metric-row:last-child{margin-bottom:0}
+.metric-label{display:flex;justify-content:space-between;align-items:center;font-size:9.5px;color:var(--muted);margin-bottom:4px;font-weight:500;}
+.metric-saving{font-family:'Space Mono',monospace;font-weight:700;color:var(--drt-bar);font-size:10px;}
+.bar-pair{display:flex;flex-direction:column;gap:4px}
+.bar-row{display:flex;align-items:center;gap:6px;font-size:10px}
+.bar-icon{width:18px;text-align:center;font-size:13px;flex-shrink:0}
+.bar-track{flex:1;height:15px;background:var(--bg);border-radius:8px;position:relative;overflow:hidden;}
+.bar-fill{height:100%;border-radius:8px;display:flex;align-items:center;justify-content:flex-end;padding-right:7px;color:#fff;font-family:'Space Mono',monospace;font-size:9.5px;font-weight:700;transition:width .6s cubic-bezier(.4,0,.2,1);min-width:52px;}
+.bar-taxi{background:var(--taxi)}
+.bar-drt{background:var(--drt-bar)}
+.divider{height:1px;background:var(--border);margin:7px 0}
+
+/* ── 결과 요약 배지: 경로 먼저 보이게 카드는 접힌 상태로 시작 ── */
+.result-badge{
+  position:absolute;left:12px;right:92px;bottom:28px;z-index:610;
+  display:none;align-items:center;justify-content:center;gap:6px;
+  background:rgba(255,255,255,.97);border:1px solid rgba(100,116,139,.18);
+  border-radius:999px;padding:10px 12px;
+  box-shadow:0 4px 16px rgba(15,23,42,.16);
+  color:var(--text);font-family:'Noto Sans KR',sans-serif;
+  font-size:12px;font-weight:900;line-height:1.1;letter-spacing:-.4px;
+  cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.result-badge strong{color:var(--drt-bar);font-family:'Space Mono',monospace;font-weight:900}
+.result-badge .badge-search{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#eef2f7;color:#64748b;font-size:11px;flex-shrink:0;margin-left:2px;border:1px solid rgba(100,116,139,.18)}
+.result-badge .chev{color:#94a3b8;font-size:14px;margin-left:0}
+.result-badge:active{transform:scale(.98);background:#f8fafc}
+@media (max-width:380px){
+  .result-badge{left:10px;right:92px;bottom:28px;font-size:11px;padding:9px 10px}
+}
+
+.loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,.96);border:1px solid var(--border);border-radius:14px;padding:20px 28px;font-size:13px;color:var(--muted);z-index:600;display:none;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.1)}
+.spinner{width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.fab{position:absolute;bottom:28px;right:16px;width:62px;height:62px;border-radius:50%;background:var(--accent);color:#fff;border:none;font-size:13px;font-weight:700;font-family:'Noto Sans KR',sans-serif;box-shadow:0 4px 20px rgba(245,158,11,.4);cursor:pointer;z-index:600;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:transform .15s;line-height:1.2}
+.fab:active{transform:scale(.92)}
+.fab-icon{width:24px;height:24px;display:flex;align-items:center;justify-content:center;color:#fff;line-height:1}.fab-icon svg{display:block}
+
+.drawer{background:var(--surface);border-top:1px solid var(--border);border-radius:20px 20px 0 0;flex-shrink:0;max-height:44vh;display:flex;flex-direction:column;transition:max-height .3s ease;box-shadow:0 -4px 16px rgba(0,0,0,.06)}
+.drawer.collapsed{max-height:52px;box-shadow:none}
+.drawer-handle{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;flex-shrink:0;min-height:52px;position:relative}
+.drawer-pill{width:32px;height:3px;background:var(--border);border-radius:2px;position:absolute;top:8px;left:50%;transform:translateX(-50%)}
+.drawer-left{display:flex;align-items:center;gap:8px}
+.hub-tag{font-size:11px;padding:3px 10px;border-radius:20px;background:rgba(245,158,11,.12);color:#d97706;font-weight:600}
+.sel-count{font-size:11px;color:var(--muted)}
+.drawer-right{display:flex;align-items:center;gap:8px}
+.btn-mini{padding:5px 12px;border:1px solid var(--border);border-radius:20px;background:var(--bg);color:var(--text);font-size:11px;cursor:pointer;font-family:'Noto Sans KR',sans-serif;font-weight:500}
+.btn-mini:active{background:var(--border)}
+.toggle-arrow{font-size:12px;color:var(--sub);transition:transform .3s;margin-left:4px}
+.drawer.collapsed .toggle-arrow{transform:rotate(180deg)}
+.stop-scroll{overflow-y:auto;flex:1;padding:4px 12px 12px;-webkit-overflow-scrolling:touch}
+.stop-scroll::-webkit-scrollbar{display:none}
+.stop-item{display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:12px;cursor:pointer;transition:background .15s;margin-bottom:2px}
+.stop-item:active{background:rgba(0,0,0,.04)}
+.stop-num{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-family:'Space Mono',monospace;font-weight:700;border:2px solid var(--sub);background:transparent;color:var(--sub);transition:all .2s}
+.stop-item.checked .stop-num{border-color:var(--item-color);background:var(--item-color);color:#fff}
+.stop-name{font-size:13px;color:var(--muted);transition:color .2s;flex:1;line-height:1.3}
+.stop-item.checked .stop-name{color:var(--text);font-weight:500}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-title">NIGHT DRT vs TAXI</div>
+  <div class="header-sub">강북·도봉구 심야 DRT — 택시 대비 효율성 비교</div>
+</div>
+
+<div class="cluster-tabs">
+  <div class="cluster-tab active" data-cluster="K-1">K-1<br><span style="font-size:9px;font-weight:500;font-family:'Noto Sans KR'">출발: 쌍문역</span></div>
+  <div class="cluster-tab" data-cluster="K-2">K-2<br><span style="font-size:9px;font-weight:500;font-family:'Noto Sans KR'">출발: 수유역</span></div>
+  <div class="cluster-tab" data-cluster="K-3">K-3<br><span style="font-size:9px;font-weight:500;font-family:'Noto Sans KR'">출발: 미아역</span></div>
+  <div class="cluster-tab" data-cluster="K-4">K-4<br><span style="font-size:9px;font-weight:500;font-family:'Noto Sans KR'">출발: 미아역</span></div>
+</div>
+
+<div class="map-wrap" id="mapWrap">
+  <div id="map"></div>
+
+  <div class="maptype-toggle" id="mapTypeToggle" aria-label="지도 배경 선택">
+    <button class="maptype-btn active" data-maptype="normal" onclick="setMapType('normal')">일반</button>
+    <button class="maptype-btn" data-maptype="satellite" onclick="setMapType('satellite')">위성</button>
+  </div>
+
+  <div class="mode-toggle" id="modeToggle" style="display:none">
+    <button class="mode-btn active" data-mode="both">전체</button>
+    <button class="mode-btn" data-mode="taxi"><span class="vehicle-icon">🚕</span> 택시</button>
+    <button class="mode-btn" data-mode="drt"><span class="vehicle-icon">🚐</span> DRT</button>
+  </div>
+
+  <div class="loading" id="loading"><div class="spinner"></div>경로 계산 중...</div>
+
+  <div class="fare-legend collapsed" id="fareLegend">
+    <button class="fare-legend-toggle" id="fareLegendToggle" onclick="toggleFareLegend()" aria-label="요금체계 펼치기">ㅁ 요금체계</button>
+    <div class="fare-legend-content">
+      <div class="fare-card-row taxi-fare-row">
+        <span class="fare-card-icon vehicle-icon">🚕</span>
+        <div class="fare-card-main">
+          <div class="fare-card-top">
+            <span class="fare-title">00~02시 심야택시</span>
+            <span class="fare-chip">기본 6,700원</span>
+          </div>
+          <div class="fare-note">1.6km 초과 <span class="green">131m당 140원</span></div>
+        </div>
+      </div>
+      <div class="fare-card-row drt-fare-row">
+        <span class="fare-card-icon vehicle-icon">🚐</span>
+        <div class="fare-card-main">
+          <div class="fare-card-top">
+            <span class="fare-title">DRT</span>
+            <span class="fare-chip green">기본 1인 1,650원</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="compare-card" id="compareCard">
+    <div class="card-handle" id="cardHandle">
+      <span class="card-drag-hint" title="드래그해서 이동" aria-label="드래그해서 이동">⠿</span>
+      <button class="card-minimize" onclick="minimizeCard()">−</button>
+    </div>
+    <div class="card-body">
+      <div class="headline" id="hSaving">운행거리 0% 절감</div>
+      <div class="headline-sub" id="hSub">차량 운행거리 절감</div>
+      <div class="cost-summary" id="costSummary" style="display:none">
+        <div class="cost-main">💰 비용 <span class="save" id="costSave">0%↓</span> · <span id="costTotalSave">0원 절감</span></div>
+        <div class="cost-sub">1인 <strong id="taxiPerPerson">0원</strong> → <strong id="drtPerPerson">1,650원</strong> <span id="fareBasis">· 00~02시</span></div>
+      </div>
+
+      <div class="metric-row">
+        <div class="metric-label">
+          <span>📏 차량 총 운행거리</span>
+          <span class="metric-saving" id="sDist">-</span>
+        </div>
+        <div class="bar-pair">
+          <div class="bar-row"><span class="bar-icon"><span class="vehicle-icon">🚕</span></span><div class="bar-track"><div class="bar-fill bar-taxi" id="bDistTaxi"></div></div></div>
+          <div class="bar-row"><span class="bar-icon"><span class="vehicle-icon">🚐</span></span><div class="bar-track"><div class="bar-fill bar-drt" id="bDistDrt"></div></div></div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="metric-row">
+        <div class="metric-label">
+          <span>⏱ 차량 총 운행시간</span>
+          <span class="metric-saving" id="sTime">-</span>
+        </div>
+        <div class="bar-pair">
+          <div class="bar-row"><span class="bar-icon"><span class="vehicle-icon">🚕</span></span><div class="bar-track"><div class="bar-fill bar-taxi" id="bTimeTaxi"></div></div></div>
+          <div class="bar-row"><span class="bar-icon"><span class="vehicle-icon">🚐</span></span><div class="bar-track"><div class="bar-fill bar-drt" id="bTimeDrt"></div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="result-badge" id="resultBadge" onclick="openResultCard()"><span id="resultBadgeText">결과 보기</span><span class="badge-search" aria-hidden="true">🔍</span><span class="chev">›</span></div>
+
+  <button class="fab" onclick="calcRoute()" aria-label="경로탐색">
+    <span class="fab-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="24" height="24">
+        <path d="M5 7.5a3 3 0 1 1 6 0c0 2.4-3 5.8-3 5.8S5 9.9 5 7.5Z" fill="none" stroke="currentColor" stroke-width="2"/>
+        <circle cx="8" cy="7.5" r="1" fill="currentColor"/>
+        <path d="M16 11.5a3 3 0 1 1 6 0c0 2.4-3 5.8-3 5.8s-3-3.4-3-5.8Z" fill="none" stroke="currentColor" stroke-width="2"/>
+        <circle cx="19" cy="11.5" r="1" fill="currentColor"/>
+        <path d="M8 14c2.5 2.2 7.5-1.8 10 1.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 2"/>
+      </svg>
+    </span>
+    <span>경로탐색</span>
+  </button>
+</div>
+
+<div class="drawer" id="drawer">
+  <div class="drawer-handle" onclick="toggleDrawer()">
+    <div class="drawer-pill"></div>
+    <div class="drawer-left">
+      <span class="hub-tag" id="hubTag">쌍문역</span>
+      <span class="sel-count" id="selCount">0개 선택</span>
+    </div>
+    <div class="drawer-right">
+      <button class="btn-mini" onclick="event.stopPropagation();selectAll()">전체선택</button>
+      <button class="btn-mini" onclick="event.stopPropagation();clearAll()">전체해제</button>
+      <span class="toggle-arrow">▼</span>
+    </div>
+  </div>
+  <div class="stop-scroll" id="stopList"></div>
+</div>
+
+<script>
+const DATA = {"K-1":{"hub_name":"쌍문역","hub_lon":127.03481,"hub_lat":37.64882,"stops":[{"order":1,"name":"창동청구빌라","lon":127.0398002969,"lat":37.6458992987},{"order":2,"name":"창동119안전센터","lon":127.0437915624,"lat":37.6463788339},{"order":3,"name":"도봉문화정보도서관","lon":127.0443542991,"lat":37.6440866968},{"order":4,"name":"창동주공4단지","lon":127.0482244126,"lat":37.6451010377},{"order":5,"name":"녹천북부역","lon":127.0505872975,"lat":37.6456721729},{"order":6,"name":"녹천역3번출구","lon":127.0524268652,"lat":37.643222946},{"order":7,"name":"창동주공17단지","lon":127.0537656741,"lat":37.6457412104},{"order":8,"name":"창동주공19단지","lon":127.0523899949,"lat":37.6490406835},{"order":9,"name":"창동동아아파트","lon":127.0514438738,"lat":37.6513525023},{"order":10,"name":"창동농협물류센터","lon":127.0512466785,"lat":37.6542124806},{"order":11,"name":"창일중학교","lon":127.047867374,"lat":37.6486610411}]},"K-2":{"hub_name":"수유역","hub_lon":127.0258704,"hub_lat":37.63828952,"stops":[{"order":1,"name":"코오롱아파트.덕성여대기숙사","lon":127.0229271728,"lat":37.6489176294},{"order":2,"name":"꽃동네","lon":127.022498822,"lat":37.6527572122},{"order":3,"name":"에덴약국","lon":127.0233665374,"lat":37.6514369621},{"order":4,"name":"쌍문1치안센터","lon":127.0202835758,"lat":37.6500958249},{"order":5,"name":"강북청년창업마루","lon":127.01746,"lat":37.646853},{"order":6,"name":"인수동장미원","lon":127.0155272484,"lat":37.6450333774},{"order":7,"name":"덕성여대.솔밭근린공원","lon":127.0126091716,"lat":37.6513809333},{"order":8,"name":"4.19민주묘지역","lon":127.0137114618,"lat":37.6491109904},{"order":9,"name":"우이동주민센터입구","lon":127.0123580949,"lat":37.6476640054},{"order":10,"name":"백련사","lon":127.0045157924,"lat":37.6441927035},{"order":11,"name":"강북청소년센터","lon":127.0067787872,"lat":37.6457796797},{"order":12,"name":"국립4.19민주묘지","lon":127.0091441274,"lat":37.6468996874},{"order":13,"name":"인수동백운교회입구","lon":127.0106566466,"lat":37.644587883},{"order":14,"name":"인수중학교.극동아파트","lon":127.010828591,"lat":37.6425036675},{"order":15,"name":"서울영어마을수유캠프.국립재활원입구","lon":127.011851385,"lat":37.6403058},{"order":16,"name":"강북구의회.강북문화예술회관","lon":127.014098535,"lat":37.6404389454},{"order":17,"name":"본원정사","lon":127.0063793815,"lat":37.6381013089},{"order":18,"name":"형제슈퍼","lon":127.0098045717,"lat":37.6366827714},{"order":19,"name":"우이초등학교후문","lon":127.0136267756,"lat":37.6383971504},{"order":20,"name":"인수동청수탕입구","lon":127.0130723558,"lat":37.6365184578},{"order":21,"name":"화계사입구.한신대학교대학원","lon":127.013957617,"lat":37.6339738966}]},"K-3":{"hub_name":"미아역","hub_lon":127.027045,"hub_lat":37.624295,"stops":[{"order":1,"name":"북부수도사업소","lon":127.0361604414,"lat":37.6342350364},{"order":2,"name":"강북보건소앞.번2동주민센터","lon":127.0376226365,"lat":37.6316563508},{"order":3,"name":"창번교","lon":127.0384278157,"lat":37.6354839138},{"order":4,"name":"북서울농협창동지점","lon":127.0412154818,"lat":37.6338519893},{"order":5,"name":"한승미메이드아파트","lon":127.043671308,"lat":37.6332317689},{"order":6,"name":"번동주공4단지","lon":127.0399848073,"lat":37.6313780406},{"order":7,"name":"번동주공1단지","lon":127.047227,"lat":37.627015},{"order":8,"name":"번동주공1단지","lon":127.048129578,"lat":37.6255071471},{"order":9,"name":"오현초등학교","lon":127.0459678973,"lat":37.6235355369},{"order":10,"name":"신원아파트.북서울꿈의교회","lon":127.044224785,"lat":37.6261160053},{"order":11,"name":"주공3단지정문","lon":127.0422330792,"lat":37.6280702834},{"order":12,"name":"번동초등학교","lon":127.0398418797,"lat":37.6289388579},{"order":13,"name":"번동한솔솔파크","lon":127.0382810784,"lat":37.627663862},{"order":14,"name":"교육촌경로당","lon":127.0356413496,"lat":37.6271601364},{"order":15,"name":"당진슈퍼","lon":127.0327877998,"lat":37.6255168584},{"order":16,"name":"동아할인마트","lon":127.0310972055,"lat":37.6278746042}]},"K-4":{"hub_name":"미아역","hub_lon":127.027045,"hub_lat":37.624295,"stops":[{"order":1,"name":"삼양동사거리.래미안트리베라","lon":127.0213079919,"lat":37.6180883036},{"order":2,"name":"삼각산고.래미안트리베라","lon":127.0218143938,"lat":37.6144302952},{"order":3,"name":"삼각산동삼각산아이원아파트후문","lon":127.0187454371,"lat":37.6162710915},{"order":4,"name":"삼각산보건지소","lon":127.015438,"lat":37.617673},{"order":5,"name":"동북프라자","lon":127.0182061055,"lat":37.6199019961},{"order":6,"name":"두산위브아파트입구","lon":127.0161949742,"lat":37.6201498963},{"order":7,"name":"삼각산동SK아파트북한산시티미양초등학교","lon":127.0133943451,"lat":37.6201843608},{"order":8,"name":"솔샘터널","lon":127.0092342783,"lat":37.6187769661},{"order":9,"name":"SK아파트.벽산아파트상가","lon":127.0111968544,"lat":37.6197323732},{"order":10,"name":"솔샘중고등학교.팔팔?미송경로당","lon":127.013138,"lat":37.623368},{"order":11,"name":"구세군강북종합사회복지관","lon":127.0138350809,"lat":37.6251665309},{"order":12,"name":"정은빌라","lon":127.012449672,"lat":37.6259965831},{"order":13,"name":"서울정인학교","lon":127.013001965,"lat":37.6292133906},{"order":14,"name":"화계사입구.종점","lon":127.01343,"lat":37.632413},{"order":15,"name":"수연슈퍼","lon":127.0113566058,"lat":37.6277190796},{"order":16,"name":"한빛맹아학교","lon":127.0152179897,"lat":37.6287112892},{"order":17,"name":"빨래골입구.수유1동주민센터","lon":127.017765125,"lat":37.629858846},{"order":18,"name":"롯데마트삼양점.래미안1차아파트","lon":127.0182240004,"lat":37.6252947897},{"order":19,"name":"삼양사거리역","lon":127.0201740841,"lat":37.6218299513}]}};
+
+const COLORS={'K-1':'#ef4444','K-2':'#3b82f6','K-3':'#16a34a','K-4':'#7c3aed'};
+let currentCluster='K-1', drawerOpen=true;
+let taxiLayers=[], drtLayer=null, markerLayers=[];
+let lastResult=null, currentMode='both';
+const DRT_FARE_PER_PERSON = 1650;
+const NIGHT_TAXI_BASE_FARE = 6700;   // 서울 중형택시 00~02시: 1.6km까지
+const NIGHT_TAXI_BASE_M = 1600;
+const NIGHT_TAXI_UNIT_M = 131;
+const NIGHT_TAXI_UNIT_FARE = 140;
+
+const map=L.map('map',{zoomControl:true,tap:true}).setView([37.635,127.025],13);
+const normalTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
+  attribution:'© CARTO',maxZoom:19,keepBuffer:4,updateWhenIdle:false
+});
+const satelliteTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+  attribution:'Tiles © Esri',maxZoom:19,keepBuffer:4,updateWhenIdle:false
+});
+let currentMapType = 'normal';
+normalTileLayer.addTo(map);
+
+function setMapType(type){
+  if(type===currentMapType) return;
+  if(type==='satellite'){
+    map.removeLayer(normalTileLayer);
+    satelliteTileLayer.addTo(map);
+  }else{
+    map.removeLayer(satelliteTileLayer);
+    normalTileLayer.addTo(map);
+  }
+  currentMapType = type;
+  document.querySelectorAll('.maptype-btn').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.maptype===type);
+  });
+  refreshMapLayout();
+}
+
+function refreshMapLayout(){
+  // 하단 드로어 접힘/펼침 후 Leaflet 타일 영역이 회색으로 남는 현상 방지
+  requestAnimationFrame(()=>map.invalidateSize(true));
+  setTimeout(()=>map.invalidateSize(true),120);
+  setTimeout(()=>map.invalidateSize(true),360);
+}
+
+// ── 드래그 ────────────────────────────────────────────────────
+const card=document.getElementById('compareCard');
+const handle=document.getElementById('cardHandle');
+let isDragging=false, startX=0, startY=0, cardX=0, cardY=0;
+
+function getCardPos(){
+  const r=card.getBoundingClientRect();
+  const w=document.getElementById('mapWrap').getBoundingClientRect();
+  return{x:r.left-w.left, y:r.top-w.top};
+}
+function setCardPos(x,y){
+  const w=document.getElementById('mapWrap');
+  x=Math.max(0,Math.min(x,w.clientWidth-card.offsetWidth));
+  y=Math.max(0,Math.min(y,w.clientHeight-card.offsetHeight));
+  card.style.transform='none';
+  card.style.left=x+'px'; card.style.top=y+'px';
+}
+
+handle.addEventListener('touchstart',e=>{
+  if(e.target.classList.contains('card-minimize'))return;
+  isDragging=true;
+  const p=getCardPos(); cardX=p.x; cardY=p.y;
+  startX=e.touches[0].clientX; startY=e.touches[0].clientY;
+  card.style.transform='none';
+  card.style.left=cardX+'px'; card.style.top=cardY+'px';
+},{passive:true});
+handle.addEventListener('touchmove',e=>{
+  if(!isDragging)return;
+  e.preventDefault();
+  setCardPos(cardX+(e.touches[0].clientX-startX), cardY+(e.touches[0].clientY-startY));
+},{passive:false});
+handle.addEventListener('touchend',()=>{isDragging=false;});
+handle.addEventListener('mousedown',e=>{
+  if(e.target.classList.contains('card-minimize'))return;
+  isDragging=true;
+  const p=getCardPos(); cardX=p.x; cardY=p.y;
+  startX=e.clientX; startY=e.clientY;
+  card.style.transform='none';
+  card.style.left=cardX+'px'; card.style.top=cardY+'px';
+});
+document.addEventListener('mousemove',e=>{if(!isDragging)return; setCardPos(cardX+(e.clientX-startX),cardY+(e.clientY-startY));});
+document.addEventListener('mouseup',()=>{isDragging=false;});
+
+function minimizeCard(){
+  card.style.display='none';
+  document.getElementById('resultBadge').style.display='flex';
+}
+function openResultCard(){
+  const wrap=document.getElementById('mapWrap');
+  card.style.display='block';
+  const cardW=card.offsetWidth||280;
+  const cardH=card.offsetHeight||260;
+  const desiredTop=Math.max(116,Math.round(wrap.clientHeight*0.42));
+  const maxTop=Math.max(8,wrap.clientHeight-cardH-12);
+  card.style.transform='none';
+  card.style.left=Math.round((wrap.clientWidth-cardW)/2)+'px';
+  card.style.top=Math.min(desiredTop,maxTop)+'px';
+  document.getElementById('resultBadge').style.display='none';
+}
+
+// ── 기존 기능 ─────────────────────────────────────────────────
+
+function toggleFareLegend(){
+  const legend=document.getElementById('fareLegend');
+  const btn=document.getElementById('fareLegendToggle');
+  const collapsed=!legend.classList.contains('collapsed');
+  legend.classList.toggle('collapsed', collapsed);
+  btn.textContent=collapsed?'ㅁ 요금체계':'−';
+  btn.setAttribute('aria-label', collapsed?'요금체계 펼치기':'요금 범례 접기');
+}
+
+function updateFloatingControlsPosition(){
+  const bottom = drawerOpen ? '28px' : '18px';
+  document.querySelector('.fab').style.bottom = bottom;
+  const badge = document.getElementById('resultBadge');
+  if(badge) badge.style.bottom = bottom;
+}
+
+function toggleDrawer(){
+  const drawer=document.getElementById('drawer');
+  drawer.style.display='flex';
+  drawerOpen=!drawerOpen;
+  drawer.classList.toggle('collapsed',!drawerOpen);
+  updateFloatingControlsPosition();
+  refreshMapLayout();
+}
+function updateCount(){
+  document.getElementById('selCount').textContent=`${document.querySelectorAll('.stop-item.checked').length}개 선택`;
+}
+function selectAll(){document.querySelectorAll('.stop-item').forEach(el=>el.classList.add('checked'));updateCount();}
+function clearAll(){document.querySelectorAll('.stop-item').forEach(el=>el.classList.remove('checked'));updateCount();}
+
+function renderStops(){
+  const d=DATA[currentCluster], color=COLORS[currentCluster];
+  const list=document.getElementById('stopList');
+  list.innerHTML='';
+  document.getElementById('hubTag').textContent=d.hub_name;
+  d.stops.forEach((s,i)=>{
+    const item=document.createElement('div');
+    item.className='stop-item'; item.dataset.idx=i;
+    item.style.setProperty('--item-color', color);
+    item.innerHTML=`<div class="stop-num">${s.order}</div><div class="stop-name">${s.name}</div>`;
+    item.onclick=()=>{item.classList.toggle('checked');updateCount();};
+    list.appendChild(item);
+  });
+  updateCount();
+  map.setView([d.hub_lat,d.hub_lon],13);
+}
+
+document.querySelectorAll('.cluster-tab').forEach(tab=>{
+  tab.onclick=()=>{
+    document.querySelectorAll('.cluster-tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    currentCluster=tab.dataset.cluster;
+    renderStops();
+    hideResults();
+  };
+});
+
+function hideResults(){
+  card.style.display='none';
+  document.getElementById('resultBadge').style.display='none';
+  document.getElementById('modeToggle').style.display='none';
+  clearLayers();
+}
+
+function clearLayers(){
+  taxiLayers.forEach(l=>map.removeLayer(l));
+  if(drtLayer)map.removeLayer(drtLayer);
+  markerLayers.forEach(m=>map.removeLayer(m));
+  taxiLayers=[]; drtLayer=null; markerLayers=[];
+}
+
+async function getOSRMRoute(coords){
+  const str=coords.map(c=>`${c[1]},${c[0]}`).join(';');
+  const res=await fetch(`https://router.project-osrm.org/route/v1/driving/${str}?overview=full&geometries=geojson&continue_straight=true`);
+  const data=await res.json();
+  const route=data.routes[0];
+  return{coords:route.geometry.coordinates.map(c=>[c[1],c[0]]),distance:route.distance,duration:route.duration};
+}
+
+async function calcRoute(){
+  const d=DATA[currentCluster], color=COLORS[currentCluster];
+  const checked=[...document.querySelectorAll('.stop-item.checked')];
+  if(!checked.length){alert('정류장을 1개 이상 선택하세요.');return;}
+
+  // 드로어 완전히 숨기지 않고 접기만
+  if(drawerOpen)toggleDrawer();
+  drawerOpen=false;
+
+  document.getElementById('loading').style.display='block';
+  hideResults();
+  refreshMapLayout();
+
+  const selected=checked.map(el=>d.stops[+el.dataset.idx]);
+  const N=selected.length;
+  const hub=[d.hub_lat,d.hub_lon];
+
+  try{
+    const taxiPromises=selected.map(s=>getOSRMRoute([hub,[s.lat,s.lon]]));
+    // DRT는 실제 노선 운영 기준: 허브 → 선택 정류장 순차 경유 → 허브 회차까지 포함
+    const drtPath=[hub,...selected.map(s=>[s.lat,s.lon]),hub];
+    const drtLegPromises=[];
+    for(let i=0;i<drtPath.length-1;i++) drtLegPromises.push(getOSRMRoute([drtPath[i],drtPath[i+1]]));
+
+    const[taxiResults,drtLegs]=await Promise.all([Promise.all(taxiPromises),Promise.all(drtLegPromises)]);
+
+    const taxiDist=taxiResults.reduce((s,r)=>s+r.distance,0);
+    const taxiTime=taxiResults.reduce((s,r)=>s+r.duration,0);
+    const drtDist=drtLegs.reduce((s,r)=>s+r.distance,0);
+    const drtTime=drtLegs.reduce((s,r)=>s+r.duration,0);
+
+    const taxiFares=taxiResults.map(r=>calcNightTaxiFare(r.distance));
+    const taxiTotalFare=taxiFares.reduce((s,f)=>s+f,0);
+    const drtTotalFare=DRT_FARE_PER_PERSON*N;
+
+    lastResult={selected,taxiResults,drtLegs,drtPath,taxiDist,taxiTime,drtDist,drtTime,taxiFares,taxiTotalFare,drtTotalFare};
+    drawMap();
+    showResult(taxiDist,taxiTime,drtDist,drtTime,N,taxiTotalFare,drtTotalFare);
+
+  }catch(e){alert('경로 오류: '+e.message);}
+  document.getElementById('loading').style.display='none';
+}
+
+function drawMap(){
+  clearLayers();
+  const r=lastResult;
+  const d=DATA[currentCluster], color=COLORS[currentCluster];
+
+  if(currentMode==='taxi'||currentMode==='both'){
+    r.taxiResults.forEach(res=>{
+      taxiLayers.push(L.polyline(res.coords,{color:'#64748b',weight:3,opacity:0.7,dashArray:'8,8'}).addTo(map));
+    });
+  }
+  if(currentMode==='drt'||currentMode==='both'){
+    const drtCoords=r.drtLegs.flatMap(l=>l.coords);
+    drtLayer=L.polyline(drtCoords,{color,weight:5,opacity:0.9}).addTo(map);
+  }
+
+  const hubIcon=L.divIcon({className:'',html:`<div style="width:22px;height:22px;background:#f59e0b;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(245,158,11,.5)"></div>`,iconSize:[22,22],iconAnchor:[11,11]});
+  markerLayers.push(L.marker([d.hub_lat,d.hub_lon],{icon:hubIcon}).bindTooltip(`🏠 ${d.hub_name}`).addTo(map));
+  r.selected.forEach((s,i)=>{
+    const icon=L.divIcon({className:'',html:`<div style="width:28px;height:28px;background:${color};border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;font-family:monospace;box-shadow:0 2px 8px rgba(0,0,0,.2)">${i+1}</div>`,iconSize:[28,28],iconAnchor:[14,14]});
+    markerLayers.push(L.marker([s.lat,s.lon],{icon}).bindTooltip(`${i+1}. ${s.name}`).addTo(map));
+  });
+
+  const allCoords=[...r.taxiResults.flatMap(t=>t.coords),...r.drtLegs.flatMap(l=>l.coords)];
+  if(allCoords.length){
+    refreshMapLayout();
+    setTimeout(()=>{
+      map.fitBounds(L.polyline(allCoords).getBounds(),{padding:[90,40],animate:false});
+      refreshMapLayout();
+    },160);
+  }
+}
+
+function calcNightTaxiFare(distanceM){
+  if(distanceM<=NIGHT_TAXI_BASE_M) return NIGHT_TAXI_BASE_FARE;
+  const extraM=distanceM-NIGHT_TAXI_BASE_M;
+  return NIGHT_TAXI_BASE_FARE + Math.ceil(extraM/NIGHT_TAXI_UNIT_M)*NIGHT_TAXI_UNIT_FARE;
+}
+function fmtWon(v){
+  return Math.round(v).toLocaleString('ko-KR')+'원';
+}
+function setResultBadge(distBetter, distSave, costBetter, costSave){
+  const distText = distBetter ? `${distSave}%↓` : `${Math.abs(distSave)}%↑`;
+  const costText = costBetter ? `${costSave}%↓` : `${Math.abs(costSave)}%↑`;
+  const distColor = distBetter ? 'var(--drt-bar)' : '#ef4444';
+  const costColor = costBetter ? 'var(--drt-bar)' : '#ef4444';
+  const badge = document.getElementById('resultBadgeText');
+  badge.innerHTML = `운행거리 <strong style="color:${distColor}">${distText}</strong> · 비용 <strong style="color:${costColor}">${costText}</strong>`;
+}
+
+function showResult(taxiDist,taxiTime,drtDist,drtTime,N,taxiTotalFare,drtTotalFare){
+  const distSave=((1-drtDist/taxiDist)*100).toFixed(0);
+  const timeSave=((1-drtTime/taxiTime)*100).toFixed(0);
+  const costSave=((1-drtTotalFare/taxiTotalFare)*100).toFixed(0);
+  const costSaveWon=taxiTotalFare-drtTotalFare;
+  const taxiPer=taxiTotalFare/N;
+  const drtPer=drtTotalFare/N;
+  const distBetter = drtDist <= taxiDist;
+  const timeBetter = drtTime <= taxiTime;
+  const costBetter = drtTotalFare <= taxiTotalFare;
+
+  // 헤드라인
+  if(distBetter){
+    document.getElementById('hSaving').textContent=`운행거리 ${distSave}% 절감`;
+    document.getElementById('hSaving').style.background='linear-gradient(135deg,#16a34a 0%,#22c55e 100%)';
+  } else {
+    document.getElementById('hSaving').textContent=`운행거리 ${Math.abs(distSave)}% 증가`;
+    document.getElementById('hSaving').style.background='linear-gradient(135deg,#ef4444 0%,#f87171 100%)';
+  }
+  document.getElementById('hSaving').style['-webkit-background-clip']='text';
+  document.getElementById('hSaving').style['background-clip']='text';
+  document.getElementById('hSaving').style.color='transparent';
+  document.getElementById('hSub').textContent=
+    `${N}명 이용 시 택시 대비 DRT`;
+
+  const distMax=Math.max(taxiDist,drtDist);
+  const timeMax=Math.max(taxiTime,drtTime);
+
+  setBar('bDistTaxi',taxiDist/distMax*100,(taxiDist/1000).toFixed(2)+'km');
+  setBar('bDistDrt', drtDist/distMax*100, (drtDist/1000).toFixed(2)+'km');
+  setBar('bTimeTaxi',taxiTime/timeMax*100,fmtTime(taxiTime));
+  setBar('bTimeDrt', drtTime/timeMax*100, fmtTime(drtTime));
+
+  // 절감률 표시 색상
+  const ds = distBetter ? `▼ ${distSave}%` : `▲ ${Math.abs(distSave)}%`;
+  const ts = timeBetter ? `▼ ${timeSave}%` : `▲ ${Math.abs(timeSave)}%`;
+  document.getElementById('sDist').textContent=ds;
+  document.getElementById('sDist').style.color=distBetter?'var(--drt-bar)':'#ef4444';
+  document.getElementById('sTime').textContent=ts;
+  document.getElementById('sTime').style.color=timeBetter?'var(--drt-bar)':'#ef4444';
+
+  document.getElementById('costSummary').style.display='block';
+  document.getElementById('costSave').textContent=costBetter ? `${costSave}%↓` : `${Math.abs(costSave)}%↑`;
+  document.getElementById('costSave').style.color=costBetter?'var(--drt-bar)':'#ef4444';
+  document.getElementById('costTotalSave').textContent=costBetter ? `${fmtWon(costSaveWon)} 절감` : `${fmtWon(Math.abs(costSaveWon))} 증가`;
+  document.getElementById('costTotalSave').style.color=costBetter?'var(--drt-bar)':'#ef4444';
+  document.getElementById('taxiPerPerson').textContent=fmtWon(taxiPer);
+  document.getElementById('drtPerPerson').textContent=fmtWon(drtPer);
+
+  // DRT 막대 색상 (불리할 때 빨간색)
+  document.getElementById('bDistDrt').style.background=distBetter?'var(--drt-bar)':'#ef4444';
+  document.getElementById('bTimeDrt').style.background=timeBetter?'var(--drt-bar)':'#ef4444';
+
+  // 접힌 요약창도 상세카드와 같은 최신 계산값으로 즉시 갱신
+  setResultBadge(distBetter, Number(distSave), costBetter, Number(costSave));
+
+  // 경로탐색 직후에는 노선이 먼저 보이도록 상세카드 대신 요약 배지만 표시
+  card.style.display='none';
+  updateFloatingControlsPosition();
+  document.getElementById('resultBadge').style.display='flex';
+  document.getElementById('modeToggle').style.display='flex';
+  refreshMapLayout();
+}
+
+function setBar(id,pct,label){
+  const el=document.getElementById(id);
+  el.style.width=pct+'%'; el.textContent=label;
+}
+function fmtTime(sec){
+  const m=Math.floor(sec/60),s=Math.round(sec%60);
+  return m>0?`${m}분${s>0?s+'초':''}`:`${s}초`;
+}
+
+document.querySelectorAll('.mode-btn').forEach(btn=>{
+  btn.onclick=()=>{
+    document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode=btn.dataset.mode;
+    if(lastResult)drawMap();
+  };
+});
+
+renderStops();
+</script>
+</body>
+</html>
